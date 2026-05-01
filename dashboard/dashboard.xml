@@ -1,232 +1,460 @@
-<dashboard version="1.1" theme="dark">
-  <label>Demo Dashboard</label>
-  <description>Test1</description>
+<form version="1.1" theme="dark">
+  <label>SIEM Analysis</label>
+  <!-- ================= BASE SEARCHES ================= -->
+  <!-- base_failed: 2 min window so KPIs drop to 0 when attack stops -->
+  <search id="base_failed">
+    <query>
+      source="/var/log/auth.log" "Failed password"
+      | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+      | rex "for (invalid user )?(?&lt;user&gt;\w+) from"
+    </query>
+    <earliest>-2m</earliest>
+    <latest>now</latest>
+    <refresh>15s</refresh>
+    <refreshType>delay</refreshType>
+  </search>
+  <!-- base_auth: 2 min window for live feed and charts -->
+  <search id="base_auth">
+    <query>
+      source="/var/log/auth.log" ("Failed password" OR "Accepted password")
+      | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+      | rex "for (invalid user )?(?&lt;user&gt;\w+) from"
+      | eval event_type=if(like(_raw,"%Failed password%"),"Failed","Accepted")
+    </query>
+    <earliest>-2m</earliest>
+    <latest>now</latest>
+    <refresh>15s</refresh>
+    <refreshType>delay</refreshType>
+  </search>
+  <!-- ================= ROW 1: KPI SINGLES ================= -->
+  <!-- ================= ROW 2: FAILED LOGIN CHART + BRUTE FORCE ================= -->
+  <!-- ================= ROW 3: SHELL & ROOT DETECTION TABLE ================= -->
+  <!-- ================= ROW 4: SHELL TREND + TOP SUDO USERS ================= -->
+  <!-- ================= ROW 5: TOP ATTACKER IPs + TARGETED USERS ================= -->
+  <!-- Note: these use 30m window intentionally so charts stay populated -->
+  <!-- ================= ROW 6: RECENT EVENTS LIVE FEED ================= -->
+  <!-- ================= ROW 7: SUCCESSFUL LOGINS + ROOT LOGIN ACTIVITY ================= -->
+  <!-- ================= ROW 8: COMPROMISE DETECTION ================= -->
+  <!-- ================= ROW 9: FAILED LOGINS HISTORY ================= -->
+  <fieldset submitButton="false" autoRun="true">
+    <input type="time" token="time_tok" searchWhenChanged="true">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+  </fieldset>
   <row>
     <panel>
-      <title>Failed Logins</title>
-      <chart>
+      <title>Failed Logins / min</title>
+      <single>
+        <search base="base_failed">
+          <query>
+            | bucket _time span=1m
+            | stats count by _time
+            | stats avg(count) as avg_per_min
+            | eval avg_per_min=round(avg_per_min,0)
+            | fields avg_per_min
+          </query>
+        </search>
+        <option name="colorBy">value</option>
+        <option name="colorMode">block</option>
+        <option name="drilldown">none</option>
+        <option name="rangeColors">["0x1a1a2e","0xd29922","0xf85149"]</option>
+        <option name="rangeValues">[20,40]</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="underLabel">avg last 2 min</option>
+        <option name="unit">/ min</option>
+        <option name="useColors">1</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Active Brute Force IPs</title>
+      <single>
+        <search base="base_failed">
+          <query>
+            | bucket _time span=1m
+            | stats count by ip, _time
+            | where count &gt; 10
+            | stats dc(ip) as brute_ips
+          </query>
+        </search>
+        <option name="colorBy">value</option>
+        <option name="colorMode">block</option>
+        <option name="rangeColors">["0x1a1a2e","0xd29922","0xf85149"]</option>
+        <option name="rangeValues">[3,7]</option>
+        <option name="useColors">true</option>
+        <option name="underLabel">IPs with &gt;10 fails/min</option>
+        <option name="drilldown">none</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Compromises Detected</title>
+      <single>
         <search>
-          <query>source="/var/log/auth.log" "Failed password"
-| stats count by host</query>
-          <earliest>rt-1h</earliest>
-          <latest>rtnow</latest>
-          <sampleRatio>1</sampleRatio>
+          <query>
+            source="/var/log/auth.log" ("Failed password" OR "Accepted password")
+            | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+            | sort 0 ip +_time
+            | streamstats current=f last(_raw) as prev_event by ip
+            | where like(_raw,"%Accepted password%") AND like(prev_event,"%Failed password%")
+            | stats count as compromises
+          </query>
+          <earliest>-5m</earliest>
+          <latest>now</latest>
           <refresh>30s</refresh>
           <refreshType>delay</refreshType>
         </search>
-        <option name="charting.axisLabelsX.majorLabelStyle.overflowMode">ellipsisNone</option>
-        <option name="charting.axisLabelsX.majorLabelStyle.rotation">0</option>
-        <option name="charting.axisTitleX.visibility">visible</option>
-        <option name="charting.axisTitleY.visibility">visible</option>
-        <option name="charting.axisTitleY2.visibility">visible</option>
-        <option name="charting.axisX.abbreviation">none</option>
-        <option name="charting.axisX.scale">linear</option>
-        <option name="charting.axisY.abbreviation">none</option>
-        <option name="charting.axisY.scale">linear</option>
-        <option name="charting.axisY2.abbreviation">none</option>
-        <option name="charting.axisY2.enabled">0</option>
-        <option name="charting.axisY2.scale">inherit</option>
-        <option name="charting.chart">bar</option>
-        <option name="charting.chart.bubbleMaximumSize">50</option>
-        <option name="charting.chart.bubbleMinimumSize">10</option>
-        <option name="charting.chart.bubbleSizeBy">area</option>
-        <option name="charting.chart.nullValueMode">gaps</option>
-        <option name="charting.chart.showDataLabels">none</option>
-        <option name="charting.chart.sliceCollapsingThreshold">0.01</option>
-        <option name="charting.chart.stackMode">stacked100</option>
-        <option name="charting.chart.style">shiny</option>
-        <option name="charting.drilldown">none</option>
-        <option name="charting.layout.splitSeries">0</option>
-        <option name="charting.layout.splitSeries.allowIndependentYRanges">0</option>
-        <option name="charting.legend.labelStyle.overflowMode">ellipsisMiddle</option>
-        <option name="charting.legend.mode">standard</option>
-        <option name="charting.legend.placement">right</option>
-        <option name="charting.lineWidth">2</option>
-        <option name="refresh.display">progressbar</option>
-        <option name="trellis.enabled">0</option>
-        <option name="trellis.scales.shared">1</option>
-        <option name="trellis.size">medium</option>
-      </chart>
+        <option name="colorBy">value</option>
+        <option name="colorMode">block</option>
+        <option name="rangeColors">["0x1a1a2e","0xd29922","0xf85149"]</option>
+        <option name="rangeValues">[1,5]</option>
+        <option name="useColors">true</option>
+        <option name="underLabel">success after failure (5min)</option>
+        <option name="drilldown">none</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Root / Shell Events</title>
+      <single>
+        <search>
+          <query>
+            source="/var/log/auth.log" ("session opened for user root" OR "sudo:" OR "su:")
+            | stats count as total_events
+          </query>
+          <earliest>-5m</earliest>
+          <latest>now</latest>
+          <refresh>15s</refresh>
+          <refreshType>delay</refreshType>
+        </search>
+        <option name="colorBy">value</option>
+        <option name="colorMode">block</option>
+        <option name="rangeColors">["0x1a1a2e","0xd29922","0xf85149"]</option>
+        <option name="rangeValues">[1,5]</option>
+        <option name="useColors">true</option>
+        <option name="underLabel">root sessions + sudo (5min)</option>
+        <option name="drilldown">none</option>
+      </single>
     </panel>
   </row>
   <row>
     <panel>
+      <title>Failed Login Activity — Last 10 min (10s buckets)</title>
       <chart>
-        <title>Ip Address</title>
         <search>
-          <query>source="/var/log/auth.log" "Failed password"
-| rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
-| stats count by ip
-| sort -count</query>
-          <earliest>rt-1h</earliest>
-          <latest>rtnow</latest>
-          <sampleRatio>1</sampleRatio>
+          <query>
+            source="/var/log/auth.log" ("Failed password" OR "Accepted password")
+            | eval event_type=if(like(_raw,"%Failed password%"),"Failed","Accepted")
+            | timechart span=10s count by event_type
+          </query>
+          <earliest>-10m</earliest>
+          <latest>now</latest>
+          <refresh>10s</refresh>
+          <refreshType>delay</refreshType>
         </search>
-        <option name="charting.axisLabelsX.majorLabelStyle.overflowMode">ellipsisNone</option>
-        <option name="charting.axisLabelsX.majorLabelStyle.rotation">0</option>
-        <option name="charting.axisTitleX.visibility">visible</option>
-        <option name="charting.axisTitleY.visibility">visible</option>
-        <option name="charting.axisTitleY2.visibility">visible</option>
-        <option name="charting.axisX.abbreviation">none</option>
-        <option name="charting.axisX.scale">linear</option>
-        <option name="charting.axisY.abbreviation">none</option>
-        <option name="charting.axisY.scale">linear</option>
-        <option name="charting.axisY2.abbreviation">none</option>
-        <option name="charting.axisY2.enabled">0</option>
-        <option name="charting.axisY2.scale">inherit</option>
-        <option name="charting.chart">pie</option>
-        <option name="charting.chart.bubbleMaximumSize">50</option>
-        <option name="charting.chart.bubbleMinimumSize">10</option>
-        <option name="charting.chart.bubbleSizeBy">area</option>
-        <option name="charting.chart.nullValueMode">gaps</option>
-        <option name="charting.chart.showDataLabels">none</option>
-        <option name="charting.chart.sliceCollapsingThreshold">0.01</option>
-        <option name="charting.chart.stackMode">stacked</option>
-        <option name="charting.chart.style">shiny</option>
-        <option name="charting.drilldown">none</option>
-        <option name="charting.layout.splitSeries">0</option>
-        <option name="charting.layout.splitSeries.allowIndependentYRanges">0</option>
-        <option name="charting.legend.labelStyle.overflowMode">ellipsisMiddle</option>
-        <option name="charting.legend.mode">standard</option>
-        <option name="charting.legend.placement">right</option>
-        <option name="charting.lineWidth">2</option>
-        <option name="refresh.display">progressbar</option>
-        <option name="trellis.enabled">0</option>
-        <option name="trellis.scales.shared">1</option>
-        <option name="trellis.size">medium</option>
+        <option name="charting.chart">area</option>
+        <option name="charting.chart.nullValueMode">zero</option>
+        <option name="charting.fieldColors">{"Failed": 0xF85149, "Accepted": 0x3FB950}</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.visibility">collapsed</option>
+        <option name="charting.chart.areaOpacity">0.2</option>
       </chart>
     </panel>
-  </row>
-  <row>
     <panel>
+      <title>Brute Force Detection — IPs &gt;10 Failures/min</title>
       <chart>
-        <title>TimeChart</title>
         <search>
-          <query>source="/var/log/auth.log" "Failed password"
-| timechart count</query>
-          <earliest>rt-1h</earliest>
-          <latest>rtnow</latest>
-          <sampleRatio>1</sampleRatio>
+          <query>
+            source="/var/log/auth.log" "Failed password"
+            | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+            | bucket _time span=1m
+            | stats count by ip, _time
+            | where count &gt; 10
+            | timechart span=1m sum(count) as brute_force_attempts
+          </query>
+          <earliest>-10m</earliest>
+          <latest>now</latest>
+          <refresh>15s</refresh>
+          <refreshType>delay</refreshType>
         </search>
-        <option name="charting.axisLabelsX.majorLabelStyle.overflowMode">ellipsisNone</option>
-        <option name="charting.axisLabelsX.majorLabelStyle.rotation">0</option>
-        <option name="charting.axisTitleX.visibility">visible</option>
-        <option name="charting.axisTitleY.visibility">visible</option>
-        <option name="charting.axisTitleY2.visibility">visible</option>
-        <option name="charting.axisX.abbreviation">none</option>
-        <option name="charting.axisX.scale">linear</option>
-        <option name="charting.axisY.abbreviation">none</option>
-        <option name="charting.axisY.scale">linear</option>
-        <option name="charting.axisY2.abbreviation">none</option>
-        <option name="charting.axisY2.enabled">0</option>
-        <option name="charting.axisY2.scale">inherit</option>
         <option name="charting.chart">column</option>
-        <option name="charting.chart.bubbleMaximumSize">50</option>
-        <option name="charting.chart.bubbleMinimumSize">10</option>
-        <option name="charting.chart.bubbleSizeBy">area</option>
-        <option name="charting.chart.nullValueMode">gaps</option>
-        <option name="charting.chart.showDataLabels">none</option>
-        <option name="charting.chart.sliceCollapsingThreshold">0.01</option>
-        <option name="charting.chart.stackMode">default</option>
-        <option name="charting.chart.style">shiny</option>
-        <option name="charting.drilldown">none</option>
-        <option name="charting.layout.splitSeries">0</option>
-        <option name="charting.layout.splitSeries.allowIndependentYRanges">0</option>
-        <option name="charting.legend.labelStyle.overflowMode">ellipsisMiddle</option>
-        <option name="charting.legend.mode">standard</option>
-        <option name="charting.legend.placement">right</option>
-        <option name="charting.lineWidth">2</option>
-        <option name="refresh.display">progressbar</option>
-        <option name="trellis.enabled">0</option>
-        <option name="trellis.scales.shared">1</option>
-        <option name="trellis.size">medium</option>
+        <option name="charting.chart.nullValueMode">zero</option>
+        <option name="charting.fieldColors">{"brute_force_attempts": 0xD29922}</option>
+        <option name="charting.axisTitleX.visibility">collapsed</option>
+        <option name="charting.legend.placement">none</option>
       </chart>
     </panel>
   </row>
   <row>
     <panel>
+      <title>Shell Execution &amp; Root Terminal Detection</title>
+      <table>
+        <search>
+          <query>
+            source="/var/log/auth.log" ("session opened for user root" OR "sudo:" OR "su:" OR "COMMAND=")
+            | rex "for user (?&lt;target_user&gt;\w+)"
+            | rex "by (?&lt;initiated_by&gt;\w+)"
+            | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+            | rex "COMMAND=(?&lt;command&gt;.+)"
+            | eval event_type=case(
+                match(_raw,"COMMAND="),                     "SUDO COMMAND",
+                match(_raw,"session opened for user root"), "ROOT SESSION OPENED",
+                match(_raw,"su:"),                          "SU ATTEMPT",
+                true(),                                     "SUSPICIOUS AUTH"
+              )
+            | eval severity=case(
+                event_type="ROOT SESSION OPENED", "CRITICAL",
+                event_type="SUDO COMMAND",        "HIGH",
+                event_type="SU ATTEMPT",          "MEDIUM",
+                true(),                           "LOW"
+              )
+            | sort -_time
+            | head 20
+            | eval Time=strftime(_time,"%Y-%m-%d %H:%M:%S")
+            | table Time, severity, event_type, target_user, initiated_by, ip, command
+            | rename severity as Severity, event_type as "Event Type",
+                     target_user as "Target User", initiated_by as "Initiated By",
+                     ip as "Source IP", command as Command
+          </query>
+          <earliest>-30m</earliest>
+          <latest>now</latest>
+          <refresh>15s</refresh>
+          <refreshType>delay</refreshType>
+        </search>
+        <option name="drilldown">row</option>
+        <option name="wrap">false</option>
+        <option name="rowNumbers">false</option>
+        <format type="color" field="Severity">
+          <colorPalette type="map">{"CRITICAL": 0xF85149, "HIGH": 0xD29922, "MEDIUM": 0x58A6FF, "LOW": 0x3FB950}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Root Session &amp; Sudo Activity Trend — Last 2hr</title>
       <chart>
         <search>
-          <query>source="/var/log/auth.log" "Failed password"
-| rex "for (invalid user )?(?&lt;user&gt;\w+)"
-| stats count by user
-| sort -count</query>
-          <earliest>-24h@h</earliest>
+          <query>
+            source="/var/log/auth.log" ("session opened for user root" OR "sudo:" OR "su:")
+            | eval activity_type=case(
+                match(_raw,"COMMAND="),                     "Sudo Command",
+                match(_raw,"session opened for user root"), "Root Session",
+                match(_raw,"su:"),                          "SU Attempt",
+                true(),                                     "Other"
+              )
+            | timechart span=5m count by activity_type
+          </query>
+          <earliest>-2h</earliest>
           <latest>now</latest>
-          <sampleRatio>1</sampleRatio>
+          <refresh>30s</refresh>
+          <refreshType>delay</refreshType>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">zero</option>
+        <option name="charting.fieldColors">{"Root Session": 0xF85149, "Sudo Command": 0x58A6FF, "SU Attempt": 0xD29922, "Other": 0x6E7681}</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="charting.axisTitleX.visibility">collapsed</option>
+        <option name="charting.chart.stackMode">stacked</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Top Users Running Sudo — Last 2hr</title>
+      <chart>
+        <search>
+          <query>
+            source="/var/log/auth.log" "sudo:"
+            | rex "sudo:\s+(?&lt;user&gt;\w+)"
+            | stats count by user
+            | sort -count
+            | head 10
+          </query>
+          <earliest>-2h</earliest>
+          <latest>now</latest>
+          <refresh>60s</refresh>
+          <refreshType>delay</refreshType>
         </search>
         <option name="charting.chart">bar</option>
-        <option name="charting.drilldown">none</option>
+        <option name="charting.fieldColors">{"count": 0x58A6FF}</option>
+        <option name="charting.legend.placement">none</option>
+        <option name="charting.axisTitleY.visibility">collapsed</option>
       </chart>
     </panel>
   </row>
   <row>
     <panel>
+      <title>Top Attacker IPs — Last 30 min</title>
       <chart>
         <search>
-          <query>source="/var/log/auth.log"
-| eval action=case(
-    like(_raw,"%Failed password%"),"Failed Login",
-    like(_raw,"%Accepted password%") OR like(_raw,"%session opened%"),"Successful Login",
-    true(),"Other"
-)
-| stats count by action
-| sort -count</query>
-          <earliest>-7d@h</earliest>
+          <query>
+            source="/var/log/auth.log" "Failed password"
+            | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+            | stats count by ip
+            | sort -count
+            | head 10
+          </query>
+          <earliest>-30m</earliest>
           <latest>now</latest>
-          <sampleRatio>1</sampleRatio>
+          <refresh>30s</refresh>
+          <refreshType>delay</refreshType>
         </search>
-        <option name="charting.chart">pie</option>
-        <option name="charting.drilldown">none</option>
-        <option name="refresh.display">progressbar</option>
+        <option name="charting.chart">bar</option>
+        <option name="charting.fieldColors">{"count": 0xF85149}</option>
+        <option name="charting.legend.placement">none</option>
+        <option name="charting.axisTitleY.visibility">collapsed</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Most Targeted Users — Last 30 min</title>
+      <chart>
+        <search>
+          <query>
+            source="/var/log/auth.log" "Failed password"
+            | rex "for (invalid user )?(?&lt;user&gt;\w+) from"
+            | stats count by user
+            | sort -count
+            | head 10
+          </query>
+          <earliest>-30m</earliest>
+          <latest>now</latest>
+          <refresh>30s</refresh>
+          <refreshType>delay</refreshType>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.fieldColors">{"count": 0xD29922}</option>
+        <option name="charting.legend.placement">none</option>
+        <option name="charting.axisTitleY.visibility">collapsed</option>
       </chart>
     </panel>
   </row>
   <row>
     <panel>
-      <title>Short Span detection</title>
-      <chart>
-        <title>1 min count</title>
+      <title>Recent Security Events — Live Feed</title>
+      <table>
         <search>
-          <query>source="/var/log/auth.log" "Failed password"
-| timechart span=1m count</query>
-          <earliest>rt-1m</earliest>
-          <latest>rt</latest>
-          <sampleRatio>1</sampleRatio>
+          <query>
+            source="/var/log/auth.log" ("Failed password" OR "Accepted password")
+            | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+            | rex "for (invalid user )?(?&lt;user&gt;\w+) from"
+            | eval event_type=case(
+                match(_raw,"Accepted password") AND match(_raw,"root"), "ROOT LOGIN",
+                match(_raw,"Accepted password"),  "SUCCESS",
+                match(_raw,"Failed password"),    "FAILED LOGIN",
+                true(),                           "OTHER"
+              )
+            | sort -_time
+            | head 20
+            | eval Time=strftime(_time,"%Y-%m-%d %H:%M:%S")
+            | table Time, event_type, ip, user, host
+            | rename event_type as "Event Type",
+                     ip as "Source IP", user as User, host as Host
+          </query>
+          <earliest>-10m</earliest>
+          <latest>now</latest>
+          <refresh>10s</refresh>
+          <refreshType>delay</refreshType>
         </search>
-        <option name="charting.axisLabelsX.majorLabelStyle.overflowMode">ellipsisNone</option>
-        <option name="charting.axisLabelsX.majorLabelStyle.rotation">0</option>
-        <option name="charting.axisTitleX.visibility">visible</option>
-        <option name="charting.axisTitleY.visibility">visible</option>
-        <option name="charting.axisTitleY2.visibility">visible</option>
-        <option name="charting.axisX.abbreviation">none</option>
-        <option name="charting.axisX.scale">linear</option>
-        <option name="charting.axisY.abbreviation">none</option>
-        <option name="charting.axisY.scale">linear</option>
-        <option name="charting.axisY2.abbreviation">none</option>
-        <option name="charting.axisY2.enabled">0</option>
-        <option name="charting.axisY2.scale">inherit</option>
-        <option name="charting.chart">line</option>
-        <option name="charting.chart.bubbleMaximumSize">50</option>
-        <option name="charting.chart.bubbleMinimumSize">10</option>
-        <option name="charting.chart.bubbleSizeBy">area</option>
-        <option name="charting.chart.nullValueMode">gaps</option>
-        <option name="charting.chart.showDataLabels">none</option>
-        <option name="charting.chart.sliceCollapsingThreshold">0.01</option>
-        <option name="charting.chart.stackMode">default</option>
-        <option name="charting.chart.style">shiny</option>
-        <option name="charting.drilldown">none</option>
-        <option name="charting.layout.splitSeries">0</option>
-        <option name="charting.layout.splitSeries.allowIndependentYRanges">0</option>
-        <option name="charting.legend.labelStyle.overflowMode">ellipsisMiddle</option>
-        <option name="charting.legend.mode">standard</option>
-        <option name="charting.legend.placement">right</option>
-        <option name="charting.lineWidth">2</option>
-        <option name="refresh.display">progressbar</option>
-        <option name="trellis.enabled">0</option>
-        <option name="trellis.scales.shared">1</option>
-        <option name="trellis.size">medium</option>
+        <option name="drilldown">row</option>
+        <option name="wrap">false</option>
+        <option name="rowNumbers">false</option>
+        <format type="color" field="Event Type">
+          <colorPalette type="map">{"ROOT LOGIN": 0xF85149, "FAILED LOGIN": 0x58A6FF, "SUCCESS": 0x3FB950}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Successful Logins by User — Last 30 min</title>
+      <chart>
+        <search>
+          <query>
+            source="/var/log/auth.log" "Accepted password"
+            | rex "for (?&lt;user&gt;\w+) from"
+            | stats count by user
+            | sort -count
+          </query>
+          <earliest>-30m</earliest>
+          <latest>now</latest>
+          <refresh>30s</refresh>
+          <refreshType>delay</refreshType>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.fieldColors">{"count": 0x3FB950}</option>
+        <option name="charting.legend.placement">none</option>
+        <option name="charting.axisTitleY.visibility">collapsed</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Root Login Activity — Last 30 min</title>
+      <chart>
+        <search>
+          <query>
+            source="/var/log/auth.log"
+            | rex "Accepted password for (?&lt;user&gt;\w+) from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+            | search user="root"
+            | timechart span=1m count
+          </query>
+          <earliest>-30m</earliest>
+          <latest>now</latest>
+          <refresh>30s</refresh>
+          <refreshType>delay</refreshType>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">zero</option>
+        <option name="charting.fieldColors">{"count": 0xF85149}</option>
+        <option name="charting.legend.placement">none</option>
       </chart>
     </panel>
   </row>
-</dashboard>
+  <row>
+    <panel>
+      <title>Compromise Detection — Success After Failure (30 min window)</title>
+      <chart>
+        <search>
+          <query>
+            source="/var/log/auth.log" ("Failed password" OR "Accepted password")
+            | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+            | sort 0 ip +_time
+            | streamstats current=f last(_raw) as prev_event by ip
+            | where like(_raw,"%Accepted password%") AND like(prev_event,"%Failed password%")
+            | timechart span=1m count
+          </query>
+          <earliest>-30m</earliest>
+          <latest>now</latest>
+          <refresh>30s</refresh>
+          <refreshType>delay</refreshType>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.chart.nullValueMode">zero</option>
+        <option name="charting.fieldColors">{"count": 0xF85149}</option>
+        <option name="charting.chart.areaOpacity">0.15</option>
+        <option name="charting.legend.placement">none</option>
+        <option name="charting.axisTitleX.visibility">collapsed</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Failed Logins Over Time — Last 2hr (1 min buckets)</title>
+      <chart>
+        <search>
+          <query>
+            source="/var/log/auth.log" "Failed password"
+            | timechart span=1m count
+          </query>
+          <earliest>-2h</earliest>
+          <latest>now</latest>
+          <refresh>1m</refresh>
+          <refreshType>delay</refreshType>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">zero</option>
+        <option name="charting.fieldColors">{"count": 0x58A6FF}</option>
+        <option name="charting.legend.placement">none</option>
+        <option name="charting.axisTitleX.visibility">collapsed</option>
+      </chart>
+    </panel>
+  </row>
+</form>
