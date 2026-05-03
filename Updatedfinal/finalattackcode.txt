@@ -1,0 +1,57 @@
+#!/bin/bash
+
+TARGET_IP="10.0.2.4"
+VALID_USER="demo"
+VALID_PASS="123"
+ROOT_PASS="123"
+ALICE_PASS="Secure@2024"
+BOB_PASS="Welcome@2024"
+BRUTE_USERS=("admin" "guest" "root" "testuser" "user1" "student" "oracle" "ubuntu" "pi" "jenkins")
+BRUTE_PASSWORDS=("123456" "password" "admin123" "letmein" "qwerty" "wrongpass" "12345" "pass123" "root123" "toor")
+SSH_OPTIONS="-o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o ConnectTimeout=1"
+
+trap "exit 0" INT TERM
+
+clear
+echo "Script is running"
+
+while true
+do
+  for user in "admin" "test" "guest" "oracle" "nobody" "ftp"
+  do
+    sshpass -p "wrongpass" ssh $SSH_OPTIONS ${user}@${TARGET_IP} "exit" 2>/dev/null
+    sleep 0.3
+  done
+
+  sshpass -p "$VALID_PASS" ssh $SSH_OPTIONS ${VALID_USER}@${TARGET_IP} "exit" 2>/dev/null
+  sleep 0.5
+  sshpass -p "$ALICE_PASS" ssh $SSH_OPTIONS alice@${TARGET_IP} "exit" 2>/dev/null
+  sleep 0.5
+  sshpass -p "$BOB_PASS" ssh $SSH_OPTIONS bob@${TARGET_IP} "exit" 2>/dev/null
+  sleep 1
+
+  for user in "${BRUTE_USERS[@]}"
+  do
+    for pass in "${BRUTE_PASSWORDS[@]}"
+    do
+      sshpass -p "$pass" ssh $SSH_OPTIONS ${user}@${TARGET_IP} "exit" 2>/dev/null &
+    done
+  done
+  wait
+  sleep 2
+
+  sshpass -p "$VALID_PASS" ssh $SSH_OPTIONS ${VALID_USER}@${TARGET_IP} \
+    "echo 'wrongpass' | su -c 'id' root 2>/dev/null; exit" 2>/dev/null
+  sleep 1
+
+  for i in {1..60}
+  do
+    sshpass -p "wrongpass" ssh $SSH_OPTIONS fakeuser@${TARGET_IP} "exit" 2>/dev/null &
+  done
+  wait
+  sleep 1
+
+  for i in {1..20}
+  do
+    sshpass -p "wrongpass" ssh $SSH_OPTIONS root@${TARGET_IP} "exit" 2>/dev/null &
+  done
