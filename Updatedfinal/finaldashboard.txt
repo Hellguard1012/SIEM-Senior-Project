@@ -1,24 +1,25 @@
 <form version="1.1" theme="dark">
   <label>SIEM Analysis</label>
-  <!-- ================= BASE SEARCHES ================= -->
-  <!-- base_failed: 2 min window so KPIs drop to 0 when attack stops -->
+
+  <!-- Base search for failed logins -->
   <search id="base_failed">
     <query>
       source="/var/log/auth.log" "Failed password"
-      | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
-      | rex "for (invalid user )?(?&lt;user&gt;\w+) from"
+      | rex "from (?<ip>\d+\.\d+\.\d+\.\d+)"
+      | rex "for (invalid user )?(?<user>\w+) from"
     </query>
     <earliest>-2m</earliest>
     <latest>now</latest>
     <refresh>15s</refresh>
     <refreshType>delay</refreshType>
   </search>
-  <!-- base_auth: 2 min window for live feed and charts -->
+
+  <!-- Base search for all auth events -->
   <search id="base_auth">
     <query>
       source="/var/log/auth.log" ("Failed password" OR "Accepted password")
-      | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
-      | rex "for (invalid user )?(?&lt;user&gt;\w+) from"
+      | rex "from (?<ip>\d+\.\d+\.\d+\.\d+)"
+      | rex "for (invalid user )?(?<user>\w+) from"
       | eval event_type=if(like(_raw,"%Failed password%"),"Failed","Accepted")
     </query>
     <earliest>-2m</earliest>
@@ -26,16 +27,7 @@
     <refresh>15s</refresh>
     <refreshType>delay</refreshType>
   </search>
-  <!-- ================= ROW 1: KPI SINGLES ================= -->
-  <!-- ================= ROW 2: FAILED LOGIN CHART + BRUTE FORCE ================= -->
-  <!-- ================= ROW 3: SHELL & ROOT DETECTION TABLE ================= -->
-  <!-- ================= ROW 4: SHELL TREND + TOP SUDO USERS ================= -->
-  <!-- ================= ROW 5: TOP ATTACKER IPs + TARGETED USERS ================= -->
-  <!-- Note: these use 30m window intentionally so charts stay populated -->
-  <!-- ================= ROW 6: RECENT EVENTS LIVE FEED ================= -->
-  <!-- ================= ROW 7: SUCCESSFUL LOGINS + ROOT LOGIN ACTIVITY ================= -->
-  <!-- ================= ROW 8: COMPROMISE DETECTION ================= -->
-  <!-- ================= ROW 9: FAILED LOGINS HISTORY ================= -->
+
   <fieldset submitButton="false" autoRun="true">
     <input type="time" token="time_tok" searchWhenChanged="true">
       <label>Time Range</label>
@@ -45,7 +37,9 @@
       </default>
     </input>
   </fieldset>
+
   <row>
+    <!-- Average failed logins per minute -->
     <panel>
       <title>Failed Logins / min</title>
       <single>
@@ -69,6 +63,8 @@
         <option name="useColors">1</option>
       </single>
     </panel>
+
+    <!-- Count IPs with more than 10 fails per minute -->
     <panel>
       <title>Active Brute Force IPs</title>
       <single>
@@ -89,13 +85,15 @@
         <option name="drilldown">none</option>
       </single>
     </panel>
+
+    <!-- Successful login right after a failed one = compromise -->
     <panel>
       <title>Compromises Detected</title>
       <single>
         <search>
           <query>
             source="/var/log/auth.log" ("Failed password" OR "Accepted password")
-            | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+            | rex "from (?<ip>\d+\.\d+\.\d+\.\d+)"
             | sort 0 ip +_time
             | streamstats current=f last(_raw) as prev_event by ip
             | where like(_raw,"%Accepted password%") AND like(prev_event,"%Failed password%")
@@ -115,6 +113,8 @@
         <option name="drilldown">none</option>
       </single>
     </panel>
+
+    <!-- Counts root sessions and sudo activity -->
     <panel>
       <title>Root / Shell Events</title>
       <single>
@@ -138,7 +138,9 @@
       </single>
     </panel>
   </row>
+
   <row>
+    <!-- Failed vs accepted login chart -->
     <panel>
       <title>Failed Login Activity — Last 10 min (10s buckets)</title>
       <chart>
@@ -161,13 +163,15 @@
         <option name="charting.chart.areaOpacity">0.2</option>
       </chart>
     </panel>
+
+    <!-- Tracks IPs that cross the brute force threshold -->
     <panel>
       <title>Brute Force Detection — IPs &gt;10 Failures/min</title>
       <chart>
         <search>
           <query>
             source="/var/log/auth.log" "Failed password"
-            | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+            | rex "from (?<ip>\d+\.\d+\.\d+\.\d+)"
             | bucket _time span=1m
             | stats count by ip, _time
             | where count &gt; 10
@@ -186,17 +190,19 @@
       </chart>
     </panel>
   </row>
+
   <row>
+    <!-- Table of root sessions, sudo, and su events with severity -->
     <panel>
       <title>Shell Execution &amp; Root Terminal Detection (10 min)</title>
       <table>
         <search>
           <query>
             source="/var/log/auth.log" ("session opened for user root" OR "sudo:" OR "su:" OR "COMMAND=")
-            | rex "for user (?&lt;target_user&gt;\w+)"
-            | rex "by (?&lt;initiated_by&gt;\w+)"
-            | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
-            | rex "COMMAND=(?&lt;command&gt;.+)"
+            | rex "for user (?<target_user>\w+)"
+            | rex "by (?<initiated_by>\w+)"
+            | rex "from (?<ip>\d+\.\d+\.\d+\.\d+)"
+            | rex "COMMAND=(?<command>.+)"
             | eval event_type=case(
                 match(_raw,"COMMAND="),                     "SUDO COMMAND",
                 match(_raw,"session opened for user root"), "ROOT SESSION OPENED",
@@ -231,7 +237,9 @@
       </table>
     </panel>
   </row>
+
   <row>
+    <!-- Stacked trend of root, sudo, and su activity -->
     <panel>
       <title>Root Session &amp; Sudo Activity Trend — Last 2hr</title>
       <chart>
@@ -259,13 +267,15 @@
         <option name="charting.chart.stackMode">stacked</option>
       </chart>
     </panel>
+
+    <!-- Top 10 users running sudo -->
     <panel>
       <title>Top Users Running Sudo — Last 2hr</title>
       <chart>
         <search>
           <query>
             source="/var/log/auth.log" "sudo:"
-            | rex "sudo:\s+(?&lt;user&gt;\w+)"
+            | rex "sudo:\s+(?<user>\w+)"
             | stats count by user
             | sort -count
             | head 10
@@ -282,14 +292,16 @@
       </chart>
     </panel>
   </row>
+
   <row>
+    <!-- IPs with the most failed logins -->
     <panel>
       <title>Top Attacker IPs — Last 30 min</title>
       <chart>
         <search>
           <query>
             source="/var/log/auth.log" "Failed password"
-            | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+            | rex "from (?<ip>\d+\.\d+\.\d+\.\d+)"
             | stats count by ip
             | sort -count
             | head 10
@@ -305,13 +317,15 @@
         <option name="charting.axisTitleY.visibility">collapsed</option>
       </chart>
     </panel>
+
+    <!-- Usernames most frequently attacked -->
     <panel>
       <title>Most Targeted Users — Last 30 min</title>
       <chart>
         <search>
           <query>
             source="/var/log/auth.log" "Failed password"
-            | rex "for (invalid user )?(?&lt;user&gt;\w+) from"
+            | rex "for (invalid user )?(?<user>\w+) from"
             | stats count by user
             | sort -count
             | head 10
@@ -328,15 +342,17 @@
       </chart>
     </panel>
   </row>
+
   <row>
+    <!-- Live feed of latest login events -->
     <panel>
       <title>Recent Security Events(10) — Live Feed</title>
       <table>
         <search>
           <query>
             source="/var/log/auth.log" ("Failed password" OR "Accepted password")
-            | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
-            | rex "for (invalid user )?(?&lt;user&gt;\w+) from"
+            | rex "from (?<ip>\d+\.\d+\.\d+\.\d+)"
+            | rex "for (invalid user )?(?<user>\w+) from"
             | eval event_type=case(
                 match(_raw,"Accepted password") AND match(_raw,"root"), "ROOT LOGIN",
                 match(_raw,"Accepted password"),  "SUCCESS",
@@ -364,14 +380,16 @@
       </table>
     </panel>
   </row>
+
   <row>
+    <!-- Successful logins grouped by user -->
     <panel>
       <title>Successful Logins by User — Last 30 min</title>
       <chart>
         <search>
           <query>
             source="/var/log/auth.log" "Accepted password"
-            | rex "for (?&lt;user&gt;\w+) from"
+            | rex "for (?<user>\w+) from"
             | stats count by user
             | sort -count
           </query>
@@ -386,13 +404,15 @@
         <option name="charting.axisTitleY.visibility">collapsed</option>
       </chart>
     </panel>
+
+    <!-- Tracks root logins over time -->
     <panel>
       <title>Root Login Activity — Last 30 min</title>
       <chart>
         <search>
           <query>
             source="/var/log/auth.log"
-            | rex "Accepted password for (?&lt;user&gt;\w+) from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+            | rex "Accepted password for (?<user>\w+) from (?<ip>\d+\.\d+\.\d+\.\d+)"
             | search user="root"
             | timechart span=1m count
           </query>
@@ -408,14 +428,16 @@
       </chart>
     </panel>
   </row>
+
   <row>
+    <!-- Detects accepted login right after failed ones -->
     <panel>
       <title>Compromise Detection — Success After Failure (30 min window)</title>
       <chart>
         <search>
           <query>
             source="/var/log/auth.log" ("Failed password" OR "Accepted password")
-            | rex "from (?&lt;ip&gt;\d+\.\d+\.\d+\.\d+)"
+            | rex "from (?<ip>\d+\.\d+\.\d+\.\d+)"
             | sort 0 ip +_time
             | streamstats current=f last(_raw) as prev_event by ip
             | where like(_raw,"%Accepted password%") AND like(prev_event,"%Failed password%")
@@ -435,7 +457,9 @@
       </chart>
     </panel>
   </row>
+
   <row>
+    <!-- Long term failed login history -->
     <panel>
       <title>Failed Logins Over Time — Last 2hr (1 min buckets)</title>
       <chart>
